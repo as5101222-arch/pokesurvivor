@@ -1,79 +1,101 @@
-/* ============ i18n.js — idiomas (español / inglés) ============
- * El juego está escrito en español. Si el idioma es inglés, todo texto que
- * se enseña se traduce con el diccionario de js/data/lang-en.js, sin tener que
- * tocar cada pantalla:
- *   - el DOM (menús, cartas, avisos...) con un MutationObserver,
- *   - el canvas (HUD, avisos, números) envolviendo fillText/strokeText,
- *   - confirm()/alert().
+/* ============ i18n.js — 介面語言（單機中文版：固定為台灣繁體中文） ============
+ * 遊戲原本是用西班牙文寫的。這裡把畫面上出現的西班牙文，依照
+ * js/data/lang-zh.js 與 js/data/lang-zh-names.js 的對照表換成中文，不必改動每個畫面：
+ *   - DOM（選單、卡片、提示…）用 MutationObserver 即時翻譯，
+ *   - canvas（HUD、提示、數字）包住 fillText/strokeText/measureText，
+ *   - confirm()/alert()。
  *
- * El diccionario usa el texto español como clave. Tres niveles:
- *   1. frase exacta                    'Volver' -> 'Back'
- *   2. patrón con huecos {x}           '¡Has conseguido a {x} shiny!' -> 'You got a shiny {x}!'
- *                                      (lo que cae en el hueco también se traduce)
- *   3. trozos dentro de un texto más largo, sólo palabras enteras
- * Lo que escriben los jugadores (apodos) va marcado con translate="no".
+ * 對照表以西班牙原文當鍵，分三層比對：
+ *   1. 整句完全相符            'Volver' -> '返回'
+ *   2. 有空位 {x} 的句型        '¡Has conseguido a {x} shiny!' -> '你得到了異色的{x}！'
+ *                              （空位裡的內容也會翻譯；譯文可用 {x1}、{x2} 調換順序）
+ *   3. 長句中的片段，只比對完整單字
+ * 另外，寶可夢的名字（addNames）會在任何句子裡被換成中文，但只比對大小寫完全相同的整個字。
+ * 玩家自己輸入的文字（暱稱）用 translate="no" 標記，不會被翻譯。
  *
- * Idioma: el elegido en Ajustes; si no, /en/ en la dirección o el del navegador
- * (español si el navegador está en español, inglés en cualquier otro caso).
+ * 改編自原作的 i18n.js（西班牙文／英文版）。
  */
 G.I18n = (() => {
-  const KEY = 'ps.lang';
-  let saved = null;
-  try { saved = localStorage.getItem(KEY); } catch (e) { /* nada */ }
-  const byPath = /\/en(\/|$)/.test(location.pathname) ? 'en' : null;
-  const nav = ((navigator.languages && navigator.languages[0]) || navigator.language || 'es').toLowerCase();
-  const lang = saved === 'es' || saved === 'en' ? saved : byPath || (nav.startsWith('es') ? 'es' : 'en');
-  document.documentElement.lang = lang;
+  const lang = 'zh';
+  document.documentElement.lang = 'zh-Hant-TW';
 
   const exact = new Map(), exactLow = new Map();
-  let patterns = [], frag = null, fragLow = null, fragMap = new Map();
+  let patterns = [], frag = null, fragMap = new Map();
+  let names = null, nameMap = new Map();
+  const byKey = new Map();   // 有空位的原文 → 譯文（給 f() 用，才能正確調換順序）
   const cache = new Map();
-  const L = '\\p{L}\\p{N}';
+  // 單字邊界只看拉丁字母和數字：中文字緊貼在旁邊時，西文片段和寶可夢名字仍然要能被換掉。
+  const L = 'A-Za-z0-9\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u024F';
   const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-  /** Añade traducciones { 'texto en español': 'English text' }. */
-  function add(dict) {
-    const fr = [];
-    for (const [es, en] of Object.entries(dict)) {
-      if (!en || es === en) continue;
+  /** 把空位填進譯文：{x} 依序填入，{x1}、{x2}… 指定第幾個。 */
+  function fill(tpl, vals) {
+    let i = 0;
+    return tpl.replace(/\{x(\d*)\}/g, (_, n) => { const v = n ? vals[+n - 1] : vals[i++]; return v === undefined ? '' : v; });
+  }
+
+  /** 加入翻譯 { '西班牙原文': '中文' }。l 是這份對照表的語言（不是目前語言就略過）。 */
+  function add(dict, l = 'en') {
+    if (l !== lang) return;
+    for (const [es, zh] of Object.entries(dict)) {
+      if (!zh || es === zh) continue;
       if (es.includes('{x}')) {
         const parts = es.split('{x}').map(reEsc);
-        patterns.push({ re: new RegExp('^' + parts.join('(.+?)') + '$', 'u'), reI: new RegExp('^' + parts.join('(.+?)') + '$', 'iu'), en });
+        byKey.set(es, zh);
+        patterns.push({ re: new RegExp('^' + parts.join('(.+?)') + '$', 'u'), reI: new RegExp('^' + parts.join('(.+?)') + '$', 'iu'), zh,
+                        lit: es.replace(/\{x\}/g, '').length });
       } else {
-        exact.set(es, en);
-        exactLow.set(es.toLowerCase(), en);
-        if (es.length >= 4 || /\s/.test(es)) { fr.push(es); fragMap.set(es.toLowerCase(), en); }
+        exact.set(es, zh);
+        exactLow.set(es.toLowerCase(), zh);
+        if (es.length >= 4 || /\s/.test(es)) fragMap.set(es.toLowerCase(), zh);
       }
     }
-    // Una sola expresión con todos los trozos (los más largos primero), sólo palabras enteras.
+    // 固定文字越多的句型越具體，先比對（例如「¡{x} shiny salvaje apareció!」要比「¡{x} salvaje apareció!」先）。
+    patterns.sort((a, b) => b.lit - a.lit);
+    // 所有片段合成一個正規表示式（長的優先），只比對完整單字。
     const all = [...fragMap.keys()].sort((a, b) => b.length - a.length).map(reEsc).join('|');
     frag = all ? new RegExp(`(?<![${L}])(${all})(?![${L}])`, 'giu') : null;
     cache.clear();
   }
 
-  function keepCase(src, en) {
-    if (src === src.toUpperCase() && /\p{L}/u.test(src)) return en.toUpperCase();
-    return en;
+  /** 加入寶可夢名字：整句相符時翻譯；在句子裡只換大小寫完全相同的整個字。 */
+  function addNames(dict, l = 'en') {
+    if (l !== lang) return;
+    for (const [en, zh] of Object.entries(dict)) {
+      if (!zh || en === zh) continue;
+      nameMap.set(en, zh);
+      if (!exact.has(en)) { exact.set(en, zh); exactLow.set(en.toLowerCase(), zh); }
+    }
+    const all = [...nameMap.keys()].sort((a, b) => b.length - a.length).map(reEsc).join('|');
+    names = all ? new RegExp(`(?<![${L}])(${all})(?![${L}])`, 'gu') : null;
+    cache.clear();
   }
 
-  /** Traduce un texto (sin espacios de los lados) al idioma actual. */
+  function keepCase(src, zh) {
+    if (src === src.toUpperCase() && /\p{L}/u.test(src)) return zh.toUpperCase();
+    return zh;
+  }
+
+  /** 把一段文字（不含前後空白）翻成目前的語言。 */
   function t(s) {
-    if (lang === 'es' || !s || typeof s !== 'string') return s;
+    if (!s || typeof s !== 'string') return s;
     if (!/\p{L}/u.test(s)) return s;
     const c = cache.get(s);
     if (c !== undefined) return c;
-    let r = core(s);
+    const r = core(s);
     if (cache.size > 4000) cache.clear();
     cache.set(s, r);
     return r;
   }
 
   function core(s) {
-    // Respeta los espacios de alrededor (nodos de texto del DOM).
+    // 保留前後的空白（DOM 的文字節點）。
     const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(s);
-    // Los textos del HTML pueden ocupar varias líneas: se comparan con los espacios juntos.
+    // HTML 裡的文字可能跨好幾行：比對時把空白合併。
     const lead = m[1], tail = m[3], body = m[2].replace(/\s+/g, ' ');
     if (!body) return s;
+    // 已經是中文、沒有拉丁字母的文字就不用處理。
+    if (!/[A-Za-zÀ-ÿ]/.test(body)) return s;
     const upper = body === body.toUpperCase() && /\p{L}/u.test(body);
     let r = exact.get(body);
     if (r === undefined && upper) { const e = exactLow.get(body.toLowerCase()); if (e !== undefined) r = keepCase(body, e); }
@@ -81,20 +103,22 @@ G.I18n = (() => {
       for (const p of patterns) {
         const mm = (upper ? p.reI : p.re).exec(body);
         if (!mm) continue;
-        let i = 1;
-        r = p.en.replace(/\{x\}/g, () => { const g = mm[i++]; return g === undefined ? '' : core(g); });
-        r = keepCase(body, r);
+        r = keepCase(body, fill(p.zh, mm.slice(1).map(g => g === undefined ? '' : core(g))));
         break;
       }
     }
-    if (r === undefined && frag) {
-      r = body.replace(frag, w => keepCase(w, fragMap.get(w.toLowerCase()) || w));
-    }
-    return lead + (r === undefined ? body : r) + tail;
+    if (r === undefined && frag) r = body.replace(frag, w => keepCase(w, fragMap.get(w.toLowerCase()) || w));
+    if (r === undefined) r = body;
+    if (names) r = r.replace(names, w => nameMap.get(w) || w);
+    r = r.replace(/(?<![\p{L}\p{N}])Nv\.(?=\s?\d)/gu, 'Lv.');   // 等級縮寫：Nv. 5 → Lv. 5
+    return lead + r + tail;
   }
 
-  /** Texto con huecos para el código: T('Nivel {x}', 5). */
-  function f(es, ...vals) { let i = 0; return t(es).replace(/\{x\}/g, () => vals[i++]); }
+  /** 程式裡用的有空位句子：T('Nivel {x}', 5)。 */
+  function f(es, ...vals) {
+    const tpl = byKey.get(es);
+    return fill(tpl !== undefined ? tpl : t(es), vals.map(v => (typeof v === 'string' ? t(v) : v)));
+  }
 
   // ---------------- DOM ----------------
   const ATTRS = ['placeholder', 'title', 'alt', 'aria-label'];
@@ -126,10 +150,6 @@ G.I18n = (() => {
   }
 
   function startDom() {
-    if (lang === 'es') return;
-    // Los enlaces a las páginas de la web, a su versión en inglés.
-    const EN_LINKS = { 'guia/': 'en/guide/', 'pokedex/': 'en/pokedex/' };
-    document.querySelectorAll('a[href]').forEach(a => { const h = a.getAttribute('href'); if (EN_LINKS[h]) a.setAttribute('href', EN_LINKS[h]); });
     walk(document.body);
     new MutationObserver(ms => {
       for (const m of ms) {
@@ -141,8 +161,8 @@ G.I18n = (() => {
     document.title = t(document.title);
   }
 
-  // ---------------- canvas y ventanas del navegador ----------------
-  if (lang !== 'es') {
+  // ---------------- canvas 與瀏覽器的對話框 ----------------
+  {
     const P = CanvasRenderingContext2D.prototype;
     for (const k of ['fillText', 'strokeText', 'measureText']) {
       const orig = P[k];
@@ -153,11 +173,9 @@ G.I18n = (() => {
     window.alert = s => oa.call(window, t(s));
   }
 
-  function set(l) {
-    try { localStorage.setItem(KEY, l); } catch (e) { /* nada */ }
-    location.reload();
-  }
+  /** 單機中文版只有一種語言：保留這個函式，讓原本的程式呼叫時不會出錯。 */
+  function set() { /* 只有中文 */ }
 
-  return { lang, add, t, f, set, startDom, walk };
+  return { lang, add, addNames, t, f, set, startDom, walk };
 })();
 G.T = G.I18n.t;

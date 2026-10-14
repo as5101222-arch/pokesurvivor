@@ -47,8 +47,9 @@
       end.setHours(24, 0, 0, 0);
       if (kind === 'w') { const add = (8 - (now.getDay() || 7)) % 7; end.setDate(end.getDate() + add); }
       const mins = Math.max(1, Math.round((end - now) / 60000));
-      return mins >= 1440 ? Math.floor(mins / 1440) + ' d ' + Math.floor(mins % 1440 / 60) + ' h'
-                          : Math.floor(mins / 60) + ' h ' + (mins % 60) + ' min';
+      // 中文版：直接用中文時間單位
+      return mins >= 1440 ? Math.floor(mins / 1440) + ' 天 ' + Math.floor(mins % 1440 / 60) + ' 小時'
+                          : Math.floor(mins / 60) + ' 小時 ' + (mins % 60) + ' 分鐘';
     }
 
     function missions(box) {

@@ -23,6 +23,9 @@
  *       ps.session       última cuenta con sesión iniciada
  *
  * El modo invitado juega con una partida en memoria que no se guarda.
+ *
+ * 單機中文版：firebase-config.js 設為 null，所以永遠是 LOCAL 模式；
+ * 第一次開啟會自動建立存檔（autoLocal），不需要登入。
  */
 G.DB = (() => {
   const K_ACC = 'ps.accounts', K_SES = 'ps.session', K_SAVE = 'ps.save.';
@@ -281,6 +284,47 @@ G.DB = (() => {
     if (!accs[k]) { remove(K_SES); return false; }
     beginLocal(k, accs[k].name);
     return true;
+  }
+
+  // ---------------- 單機中文版：自動存檔、匯出、匯入 ----------------
+  const LOCAL_KEY = 'local', LOCAL_NAME = '訓練家';
+
+  /** 單機版不用登入：第一次開啟就自動建立這台電腦的存檔。 */
+  function autoLocal() {
+    const accs = read(K_ACC) || {};
+    if (!accs[LOCAL_KEY]) {
+      accs[LOCAL_KEY] = { name: LOCAL_NAME, salt: '', hash: '', created: Date.now() };
+      if (!write(K_ACC, accs)) return false;   // 瀏覽器不讓存資料
+    }
+    beginLocal(LOCAL_KEY, accs[LOCAL_KEY].name);
+    write(K_SAVE + LOCAL_KEY, save);
+    return true;
+  }
+
+  /** 目前存檔的 JSON 文字（備份用）。 */
+  function exportSave() {
+    if (!save) return null;
+    return JSON.stringify({ game: 'PokeSurvivor-zh', exported: new Date().toISOString(), save }, null, 1);
+  }
+
+  /** 從備份檔還原存檔。→ { ok, error } */
+  function importSave(text) {
+    let o;
+    try { o = JSON.parse(text); } catch (e) { return { ok: false, error: '這不是有效的存檔檔案。' }; }
+    const s = o && o.save ? o.save : o;
+    if (!s || typeof s !== 'object' || !s.owned || !s.stats) return { ok: false, error: '這不是 PokéSurvivor 的存檔。' };
+    if (!key) autoLocal();
+    const fixed = migrate(s, user || LOCAL_NAME);
+    fixed.name = user || fixed.name;
+    fixed.updated = Date.now();
+    if (!write(K_SAVE + key, fixed)) return { ok: false, error: '瀏覽器不允許保存資料。' };
+    return { ok: true };
+  }
+
+  /** 刪除這台電腦上的存檔，從頭開始。 */
+  function resetSave() {
+    remove(K_SAVE + LOCAL_KEY); remove(K_SES);
+    const accs = read(K_ACC) || {}; delete accs[LOCAL_KEY]; write(K_ACC, accs);
   }
 
   /** Partida de una cuenta local antigua, si el nombre y la contraseña coinciden. */
@@ -546,7 +590,7 @@ G.DB = (() => {
     readyP = (async () => {
       try { if (await initCloud()) mode = 'cloud'; }
       catch (e) { console.warn('[DB] sin nube:', e.message); localReason = 'error'; mode = 'local'; }
-      if (mode === 'local') { setSync('local'); return restoreLocal(); }
+      if (mode === 'local') { setSync('local'); return restoreLocal() || autoLocal(); }
       const u = await new Promise(res => { const off = auth.onAuthStateChanged(x => { off(); res(x); }); });
       if (!u) return false;
       try { await openCloud(u); return true; }
@@ -712,6 +756,7 @@ G.DB = (() => {
 
   return {
     ready, register, login, loginWithGoogle, playAsGuest, logout, commit, deleteAccount, flush: pushNow,
+    exportSave, importSave, resetSave,
     owns, grant, ownsShiny, grantShiny, merge, setName, upgradesOf,
     onSync(fn) { listeners.add(fn); },
     onLeave(fn) { leaveHooks.push(fn); },

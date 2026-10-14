@@ -1,6 +1,7 @@
 /* ============ settings-ui.js — pantalla de Ajustes (PC y móvil) ============
  * Se abre por encima de lo que haya (menú o pausa) y al cerrar vuelve ahí.
  * Pestañas: Sonido · Gráficos · Controles · Cuenta · Acerca de.
+ * 單機中文版：「Cuenta」分頁改成存檔管理（匯出／匯入／刪除），拿掉語言切換。
  * Los ajustes son de este dispositivo (G.Settings / G.Audio en el navegador).
  */
 G.SettingsUI = (() => {
@@ -11,6 +12,14 @@ G.SettingsUI = (() => {
   let tab = 'sound';
 
   function init() {
+    // 下載進度：設定開著、停在存檔分頁時，只更新那一列（不重畫整頁，捲動位置才不會跳掉）
+    if (G.Offline) G.Offline.on(() => {
+      const row = isOpen() && tab === 'acc' && $('set-offline-row');
+      if (!row) return;
+      const tmp = document.createElement('div'); tmp.innerHTML = offlineSection();
+      const nr = tmp.querySelector('#set-offline-row');
+      if (nr) { row.replaceWith(nr); wireOffline(); }
+    });
     document.querySelectorAll('#set-tabs .gen-tab').forEach(b => { b.onclick = () => { tab = b.dataset.t; render(); }; });
     $('set-close').onclick = close;
     $('btn-settings').innerHTML = G.Icons.html('gear', 20);
@@ -74,10 +83,7 @@ G.SettingsUI = (() => {
       G.UI.soundControls($('set-sound'));
     } else if (tab === 'gfx') {
       const auto = ['baja', 'media', 'alta'][G.Settings.autoLevel];
-      box.innerHTML = section('Idioma', 'El juego se recarga al cambiarlo.')
-        + `<div class="chips set-chips" translate="no">${[['es', 'Español'], ['en', 'English']].map(([v, l]) =>
-             `<button class="chip ${G.I18n.lang === v ? 'on' : ''}" data-lang="${v}">${l}</button>`).join('')}</div>`
-        + section('Calidad', 'Cuántos efectos y partículas se dibujan. <b>Auto</b> la baja sola si el juego va a tirones (ahora: ' + auto + ').')
+      box.innerHTML = section('Calidad', 'Cuántos efectos y partículas se dibujan. <b>Auto</b> la baja sola si el juego va a tirones (ahora: ' + auto + ').')
         + choice('quality', [['auto', 'Auto'], ['high', 'Alta'], ['mid', 'Media'], ['low', 'Baja']])
         + section('Pantalla')
         + toggle('dmgNumbers', 'Números de daño', 'Los números que salen al golpear y al recibir daño.')
@@ -102,45 +108,77 @@ G.SettingsUI = (() => {
     } else if (tab === 'acc') {
       renderAccount(box);
     } else {
-      box.innerHTML = `<div class="about-logo">PokéSurvivor</div><p class="sub center">Versión ${esc(VERSION)}</p>`
-        + `<p class="sub">Juego de fans <b>gratuito y sin ánimo de lucro</b>: sin anuncios ni compras. Pokémon y sus personajes son propiedad de Nintendo, Creatures y GAME FREAK; este proyecto no está afiliado a ellos.</p>`
-        + section('Créditos')
+      box.innerHTML = `<div class="about-logo">PokéSurvivor</div><p class="sub center">單機中文版 · 改編自原作版本 ${esc(VERSION)}</p>`
+        + `<p class="sub">粉絲製作的<b>免費、非營利</b>同人遊戲：沒有廣告也沒有付費內容。寶可夢與其角色屬於 Nintendo、Creatures 和 GAME FREAK；本作與他們沒有任何關係。</p>`
+        + `<p class="sub">這個版本不連網：拿掉了帳號、好友、多人連線和排行榜，存檔只放在你的瀏覽器裡。請自己遊玩就好，不要公開散布或拿來營利。</p>`
+        + section('製作名單')
         + `<ul class="credits">
-             <li><b>Sprites:</b> PMD SpriteCollab y sus artistas (CC BY-NC 4.0).</li>
-             <li><b>Datos de los Pokémon:</b> PokéAPI.</li>
-             <li><b>Música y sonidos:</b> originales, generados por el propio juego.</li>
-             <li><b>Fuente:</b> Pixelify Sans (OFL).</li>
+             <li><b>原作：</b>JPTER78《PokéSurvivor · Mundo Misterioso》（程式碼為 MIT 授權）。</li>
+             <li><b>角色圖：</b>PMD SpriteCollab 與其繪師（CC BY-NC 4.0，名單見 CREDITS.md）。</li>
+             <li><b>寶可夢資料與中文名稱：</b>PokéAPI。</li>
+             <li><b>音樂與音效：</b>原作原創，由遊戲本身即時合成。</li>
+             <li><b>字型：</b>Pixelify Sans（OFL）、俐方體11號 Cubic 11。</li>
            </ul>`
         + `<div class="row wrap" style="justify-content:center;gap:8px">
-             ${window.PS_PAGES ? `<a class="btn small" href="${G.I18n.lang === 'en' ? 'en/guide/' : 'guia/'}" target="_blank">Guía y preguntas</a>
-             <a class="btn small" href="${G.I18n.lang === 'en' ? 'en/pokedex/' : 'pokedex/'}" target="_blank">Pokédex</a>` : ''}
-             <button class="btn small" data-legal>Aviso legal y privacidad</button>
-             <a class="btn small" href="contacto/" target="_blank" rel="noopener">Contacto</a>
-             <a class="btn small" href="${REPO}" target="_blank" rel="noopener">Código (GitHub)</a>
+             <button class="btn small" data-legal>法律聲明</button>
+             <a class="btn small" href="${REPO}" target="_blank" rel="noopener">原作原始碼（GitHub）</a>
            </div>`;
     }
     wire(box);
   }
 
+  /** 「存檔」分頁（單機中文版）：存檔只在這個瀏覽器，可以匯出備份、匯入、重置。 */
   function renderAccount(box) {
-    const st = G.DB.guest ? 'guest' : G.DB.syncState;
-    const SYNC = { ok: 'Guardado en la nube', syncing: 'Guardando…', pending: 'Pendiente de subir (se sube al salir del juego)',
-                   offline: 'Sin conexión: se subirá al volver', local: 'Guardado sólo en este navegador', guest: 'Invitado: no se guarda' };
-    if (G.DB.guest) {
-      box.innerHTML = section('Cuenta', 'Estás jugando como <b>invitado</b>: tu progreso no se guarda al salir.')
-        + `<button class="btn gold" id="set-login">Crear cuenta o entrar</button>`;
-      return;
-    }
-    const nick = G.Social.me ? G.Social.me.name : (G.DB.user || '');
-    const kind = G.DB.mode === 'local' ? 'Cuenta de este navegador' : G.DB.nameAccount ? 'Nombre y contraseña' : 'Google';
-    box.innerHTML = section('Cuenta')
-      + `<div class="set-row"><div class="grow"><b>Apodo</b><small>Es único y no se puede cambiar.</small></div><span class="gold" translate="no">${esc(nick)}</span></div>`
-      + `<div class="set-row"><div class="grow"><b>Tipo de cuenta</b></div><span>${esc(kind)}</span></div>`
-      + `<div class="set-row"><div class="grow"><b>Partida</b></div><span>${esc(SYNC[st] || st)}</span></div>`
+    const st = G.DB.save && G.DB.save.stats || {};
+    box.innerHTML = section('存檔', '存檔只保存在<b>這個瀏覽器</b>裡。清除瀏覽器資料、換瀏覽器或換手機／電腦，存檔都不會跟著走，記得偶爾匯出備份。')
+      + `<div class="set-row"><div class="grow"><b>已收集的寶可夢</b></div><span class="gold">${Object.keys((G.DB.save && G.DB.save.owned) || {}).length}</span></div>`
+      + `<div class="set-row"><div class="grow"><b>遊玩局數</b></div><span>${st.runs || 0}</span></div>`
       + `<div class="row wrap" style="gap:8px;margin-top:12px">
-           <button class="btn" id="set-logout">Cerrar sesión</button>
-           <button class="btn danger" id="set-delete">Borrar cuenta</button>
-         </div><p class="note" id="set-msg"></p>`;
+           <button class="btn gold" id="set-export">匯出存檔</button>
+           <button class="btn" id="set-import">匯入存檔</button>
+           <button class="btn danger" id="set-reset">刪除存檔</button>
+         </div><p class="note" id="set-msg"></p>
+         <input type="file" id="set-file" accept=".json,application/json" class="hidden">`
+      + offlineSection();
+  }
+
+  function wireOffline() {
+    const off = $('set-offline');
+    if (off) off.onclick = () => {
+      off.disabled = true;
+      G.Offline.run().then(ok => {
+        if (G.Offline.state.noServer) G.UI.toast('連不上遊戲網址：請確認有網路（用伺服器 App 的話，要先打開它）再試一次。', 5000);
+        if (isOpen() && tab === 'acc') render();
+      });
+    };
+  }
+
+  /** 「離線遊玩」狀態（手機用 localhost 開啟時才有意義，見 js/core/offline.js）。 */
+  function offlineSection() {
+    const O = G.Offline && G.Offline.state;
+    if (!O || !O.http) return '';
+    let txt, btn = '';
+    if (!O.can) txt = '要用 <b>http://localhost:連接埠</b> 開啟才能離線玩（用 IP 位址開啟時不行）。';
+    else if (O.running) txt = `下載中… <b class="gold">${O.done} / ${O.total}</b>（可以先玩，不用等）`;
+    else if (O.finished) txt = '<b class="gold">已存好</b>：沒有網路也能玩。';
+    else {
+      txt = O.missing > 0 ? `還有 ${O.missing} 張圖沒存，要連得上遊戲網址才能下載。` : '尚未下載，要連得上遊戲網址才能下載。';
+      btn = '<button class="btn small gold" id="set-offline">開始下載</button>';
+    }
+    return section('離線遊玩') + `<div class="set-row" id="set-offline-row"><div class="grow"><small>${txt}</small></div>${btn}</div>`;
+  }
+
+
+  function downloadSave() {
+    const txt = G.DB.exportSave();
+    if (!txt) return;
+    const d = new Date(), pad = n => String(n).padStart(2, '0');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([txt], { type: 'application/json' }));
+    a.download = `PokeSurvivor存檔-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    $('set-msg').textContent = '已下載備份檔。';
   }
 
   function wire(box) {
@@ -149,20 +187,31 @@ G.SettingsUI = (() => {
       b.onclick = () => { const v = b.dataset.v; G.Settings.set(b.dataset.k, isNaN(+v) ? v : +v); render(); };
     });
     const full = $('set-full'); if (full) full.onclick = toggleFull;
-    box.querySelectorAll('[data-lang]').forEach(b => { b.onclick = () => { if (b.dataset.lang !== G.I18n.lang) G.I18n.set(b.dataset.lang); }; });
-    const lo = $('set-login'); if (lo) lo.onclick = () => { close(); leave(); };
-    const out = $('set-logout'); if (out) out.onclick = () => { close(); leave(); };
-    const del = $('set-delete');
-    if (del) del.onclick = async () => {
-      const ok = await G.UI.confirmDelete();
-      if (!ok) return;
-      del.disabled = true;
-      const r = await G.DB.deleteAccount(ok.pass);
-      if (!r.ok) { $('set-msg').textContent = r.error; del.disabled = false; return; }
-      close();
-      G.UI.toast('Cuenta borrada');
-      G.Audio.music(null);
-      G.Flow.toLogin();
+    const ex = $('set-export'); if (ex) ex.onclick = downloadSave;
+    wireOffline();
+    const im = $('set-import'), file = $('set-file');
+    if (im && file) {
+      im.onclick = () => {
+        if (G.Game.state !== 'ui') { $('set-msg').textContent = '請先回到主選單再匯入。'; return; }
+        file.value = ''; file.click();
+      };
+      file.onchange = () => {
+        const f = file.files && file.files[0];
+        if (!f) return;
+        f.text().then(txt => {
+          if (!confirm('匯入後，目前的存檔會被備份檔取代。確定要匯入嗎？')) return;
+          const r = G.DB.importSave(txt);
+          if (!r.ok) { $('set-msg').textContent = r.error; return; }
+          location.reload();
+        });
+      };
+    }
+    const rs = $('set-reset');
+    if (rs) rs.onclick = () => {
+      if (!confirm('確定要刪除存檔嗎？收集的寶可夢、金幣和強化都會消失，而且無法復原。\n（建議先按「匯出存檔」備份。）')) return;
+      if (G.Game.state !== 'ui') G.Game.quit && G.Game.quit();
+      G.DB.resetSave();
+      location.reload();
     };
   }
 

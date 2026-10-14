@@ -15,6 +15,23 @@
   font-weight: 551 900;
   font-display: block;
 }
+/* 中文版：中文字用像素字型「俐方體11號」（Cubic 11，自由授權，見 assets/fonts/Cubic_11-OFL.txt）。
+ * 掛在同一個 'Pixelify' 字型家族底下，只負責中日韓字元，所以畫面上所有用到 Pixelify
+ * 的地方（選單和 canvas）都會自動用像素中文字，英數字仍然是 Pixelify。 */
+@font-face {
+  font-family: 'Pixelify';
+  src: url('../assets/fonts/Cubic_11.woff2') format('woff2');
+  font-weight: 400 550;
+  font-display: block;
+  unicode-range: U+2E80-2FFF, U+3000-303F, U+3100-312F, U+31A0-31BF, U+3400-4DBF, U+4E00-9FFF, U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF;
+}
+@font-face {
+  font-family: 'Pixelify';
+  src: url('../assets/fonts/Cubic_11.woff2') format('woff2');
+  font-weight: 551 900;
+  font-display: block;
+  unicode-range: U+2E80-2FFF, U+3000-303F, U+3100-312F, U+31A0-31BF, U+3400-4DBF, U+4E00-9FFF, U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF;
+}
 
 :root {
   --ink: #ffffff;

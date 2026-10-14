@@ -38,8 +38,15 @@
     if (broken()) return;
     G.I18n.startDom();
     // Espera a la fuente pixel para que la UI no salte al cargarla.
-    const ready = document.fonts && document.fonts.load ? document.fonts.load('16px Pixelify') : Promise.resolve();
-    ready.catch(() => {}).then(() => G.Flow.boot());
+    // 中文版：英數字（Pixelify）和中文字（俐方體11號）兩種字重都先載好。
+    const ready = document.fonts && document.fonts.load
+      ? Promise.all(['16px Pixelify', '700 16px Pixelify'].flatMap(f => [document.fonts.load(f), document.fonts.load(f, '寶可夢')]))
+      : Promise.resolve();
+    ready.catch(() => {}).then(() => {
+      G.Flow.boot();
+      // 單機中文版：手機用 localhost 開啟時，在背景把整個遊戲存進瀏覽器（見 js/core/offline.js）
+      if (G.Offline) setTimeout(() => G.Offline.auto(), 4000);
+    });
   }
   if (document.readyState === 'loading') addEventListener('DOMContentLoaded', boot);
   else boot();

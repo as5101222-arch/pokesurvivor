@@ -13,6 +13,7 @@ G.SupportUI = (() => {
   function init() {
     const b = $('btn-support');
     if (!F.url) return;                       // aún sin cuenta de Ko-fi: no sale
+    if (G.FIREBASE_CONFIG === null) return;   // 單機中文版：不顯示贊助按鈕（原作的贊助是給線上伺服器用的）
     b.classList.remove('hidden');
     b.innerHTML = G.Icons.html('heart', 18) + ' <span>Apoyar</span>';
     b.onclick = open;

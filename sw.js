@@ -4,6 +4,9 @@
  * - Sprites, iconos y fuente: no cambian nunca, se sirven de la caché
  *   (se van guardando según se usan: no se descarga todo de golpe).
  * - Firebase y demás servicios de fuera no se tocan.
+ *
+ * 單機中文版：js/core/offline.js 會把全部檔案先存進這兩個快取，
+ * 存好之後伺服器沒開也能整個從快取執行。
  */
 const CODE = 'ps-code-v1', ART = 'ps-art-v1';
 
@@ -25,7 +28,7 @@ self.addEventListener('fetch', e => {
   const art = /\/assets\/(pokemon|icons|fonts)\//.test(url.pathname);
   if (art) {
     e.respondWith(caches.open(ART).then(async c => {
-      const hit = await c.match(req);
+      const hit = await c.match(req, { ignoreSearch: true });   // 中文版：重試時網址會加 ?r=，也要找得到
       if (hit) return hit;
       const res = await fetch(req);
       if (res.ok) c.put(req, res.clone());
